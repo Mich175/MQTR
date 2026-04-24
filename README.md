@@ -1,11 +1,11 @@
-# GTR-PyTorch
+# MQTR — Multi-Query Tracking Transformer
 
 A clean PyTorch reimplementation of **Global Tracking Transformers (GTR, CVPR 2022)**,
 completely removing the detectron2 dependency and replacing the detector with YOLO.
 
 ## Key Improvements over Original GTR
 
-| | Original GTR | GTR-PyTorch |
+| | Original GTR | MQTR |
 |---|---|---|
 | Framework | detectron2 + CenterNet2 | Pure PyTorch |
 | Detector | CenterNet2 (locked) | Any YOLO (v8/v9/v11) |
@@ -49,7 +49,7 @@ python track.py --video input.mp4 --output output.mp4 --classes 0
 python track.py --video input.mp4 --yolo yolov8n.pt --output output.mp4
 
 # Multi-query strategies
-python track.py --video input.mp4 --query-strategy all       # all frames as queries
+python track.py --video input.mp4 --query-strategy all
 python track.py --video input.mp4 --query-strategy last_k --n-queries 3
 python track.py --video input.mp4 --query-strategy uniform --n-queries 4
 
@@ -59,9 +59,9 @@ python track.py --video input.mp4 --window 8
 
 ## Multi-Query Strategy
 
-The key innovation over the original GTR:
+The core innovation of MQTR:
 
-- **`all`**: every frame in the window acts as a Query (most thorough)
+- **`all`**: every frame in the window acts as a query (most thorough)
 - **`last_k`**: only the most recent k frames (balance of speed/accuracy)
 - **`uniform`**: uniformly sampled frames across the window
 
@@ -71,7 +71,7 @@ newer frames get higher weights, resolving conflicts via score magnitude.
 ## Project Structure
 
 ```
-gtr-pytorch/
+MQTR/
 ├── detector/
 │   └── yolo_detector.py      # YOLO wrapper
 ├── tracker/
