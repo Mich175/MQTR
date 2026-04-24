@@ -1,0 +1,74 @@
+# configs/default.yaml
+# GTR-PyTorch default configuration
+
+# ── Detector ──────────────────────────────────────────────
+detector:
+  model_name: "weights/yolo11x.pt"
+  conf_thresh: 0.3
+  nms_thresh: 0.45
+  img_size: 1280
+  target_classes: [0]           # 0 = person (COCO)
+
+# ── Re-ID Extractor ───────────────────────────────────────
+reid:
+  type: "st"                    # "cnn" or "st"
+  d_model: 256
+  n_frames: 4
+  freeze_vit: true
+  crop_size: 224
+
+# ── GTR Transformer ───────────────────────────────────────
+transformer:
+  d_model: 256
+  n_heads: 8
+  n_enc: 4
+  n_dec: 4
+  dim_ff: 1024
+  dropout: 0.1
+
+# ── Sliding Window ────────────────────────────────────────
+tracker:
+  window_size: 32
+  min_track_len: 2
+
+# ── Association ───────────────────────────────────────────
+association:
+  overlap_thresh: 0.5
+  asso_thresh: 0.3
+  with_iou: true
+  decay_time: 0.9
+  max_center_dist: 4.0
+  query_strategy: "first_mid_last"  # "first_mid_last"|"all"|"last_k"|"uniform"
+  n_queries: 3
+  motion_sigma: 50.0
+
+  # ── Trio-Weight 开关（消融实验时改这里）──────────────────
+  use_temporal_weight: true     # w_t = (k+1)/T
+  use_confidence_weight: true   # w_c = sigmoid(score)
+  use_motion_weight: true       # w_m = exp(-Δv²/σ²)
+
+# ── Training ──────────────────────────────────────────────
+train:
+  epochs: 30
+  batch_size: 64
+  lr: 1e-4
+  weight_decay: 1e-4
+  unfreeze_epoch: 10
+  unfreeze_blocks: 4
+  num_workers: 8
+  device: "cuda"
+  save_dir: "checkpoints"
+
+# ── Data ──────────────────────────────────────────────────
+data:
+  mot17_root: "data/MOT17"
+  dancetrack_root: "data/DanceTrack"
+  min_track_len: 8
+  n_frames: 4
+  img_size: 224
+
+# ── Evaluation ────────────────────────────────────────────
+eval:
+  device: "cuda"
+  split: "val"
+  output_dir: "results"
