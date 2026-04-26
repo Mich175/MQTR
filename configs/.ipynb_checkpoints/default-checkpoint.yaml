@@ -34,7 +34,7 @@ tracker:
 # ── Association ───────────────────────────────────────────
 association:
   overlap_thresh: 0.5
-  asso_thresh: 0.1
+  asso_thresh: 0.3
   with_iou: true
   decay_time: 0.9
   max_center_dist: 4.0

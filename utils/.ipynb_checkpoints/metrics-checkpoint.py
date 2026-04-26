@@ -1,6 +1,9 @@
 """
 utils/metrics.py
-MOT evaluation metrics: MOTA, HOTA, IDF1, AssA, DetA.
+MOT evaluation metrics: MOTA, HOTA, IDF1.
+
+Writes tracker results in MOT format and
+calls TrackEval for official evaluation.
 """
 
 import os
@@ -9,6 +12,16 @@ from pathlib import Path
 
 
 def write_mot_results(results, output_dir: str, seq_name: str):
+    """
+    Write tracking results in MOT challenge format.
+
+    Format: frame, id, x, y, w, h, conf, -1, -1, -1
+
+    Args:
+        results:    list of per-frame results from tracker
+        output_dir: directory to save results
+        seq_name:   sequence name (e.g. MOT17-02-FRCNN)
+    """
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"{seq_name}.txt")
 
@@ -30,82 +43,14 @@ def write_mot_results(results, output_dir: str, seq_name: str):
     return output_path
 
 
-def compute_metrics_trackeval(gt_folder, pred_folder, seq_name, split="val"):
-    """
-    Use TrackEval to compute HOTA, IDF1, MOTA, AssA, DetA.
-    """
-    try:
-        import trackeval
-        from trackeval import Evaluator
-        from trackeval.datasets import MotChallenge2DBox
-        from trackeval.metrics import HOTA, CLEAR, Identity
-
-        dataset_config = {
-            'GT_FOLDER': gt_folder,
-            'TRACKERS_FOLDER': pred_folder,
-            'OUTPUT_FOLDER': None,
-            'TRACKERS_TO_EVAL': ['MQTR'],
-            'CLASSES_TO_EVAL': ['pedestrian'],
-            'BENCHMARK': 'MOT17',
-            'SPLIT_TO_EVAL': split,
-            'INPUT_AS_ZIP': False,
-            'PRINT_CONFIG': False,
-            'DO_PREPROC': True,
-            'TRACKER_SUB_FOLDER': '',
-            'OUTPUT_SUB_FOLDER': '',
-            'SEQMAP_FILE': None,
-            'SEQMAP_FOLDER': None,
-            'SEQ_INFO': {seq_name: None},
-            'GT_LOC_FORMAT': '{gt_folder}/{seq}/gt/gt.txt',
-            'SKIP_SPLIT_FOL': True,
-        }
-
-        eval_config = {
-            'USE_PARALLEL': False,
-            'NUM_PARALLEL_CORES': 1,
-            'BREAK_ON_ERROR': False,
-            'PRINT_RESULTS': False,
-            'PRINT_ONLY_COMBINED': False,
-            'PRINT_CONFIG': False,
-            'TIME_PROGRESS': False,
-            'OUTPUT_SUMMARY': False,
-            'OUTPUT_EMPTY_CLASSES': False,
-            'OUTPUT_DETAILED': False,
-            'PLOT_CURVES': False,
-        }
-
-        evaluator = Evaluator(eval_config)
-        dataset = MotChallenge2DBox(dataset_config)
-        metrics = [HOTA(), CLEAR(), Identity()]
-        results, _ = evaluator.evaluate([dataset], metrics)
-
-        # Extract key metrics
-        res = results['MotChallenge2DBox']['MQTR'][seq_name]['pedestrian']
-        hota = np.mean(res['HOTA']['HOTA']) * 100
-        assa = np.mean(res['HOTA']['AssA']) * 100
-        deta = np.mean(res['HOTA']['DetA']) * 100
-        mota = res['CLEAR']['MOTA'] * 100
-        idf1 = res['Identity']['IDF1'] * 100
-        idsw = res['CLEAR']['IDSW']
-
-        return {
-            'HOTA': round(hota, 2),
-            'AssA': round(assa, 2),
-            'DetA': round(deta, 2),
-            'MOTA': round(mota, 2),
-            'IDF1': round(idf1, 2),
-            'IDSW': int(idsw),
-        }
-
-    except Exception as e:
-        print(f"[TrackEval] Failed: {e}, falling back to basic metrics")
-        return None
-
-
 def compute_basic_metrics(gt_path: str, pred_path: str):
     """
-    Fallback: compute basic MOTA without TrackEval.
+    Compute basic MOT metrics without TrackEval.
+    Returns MOTA approximation.
+
+    For official HOTA/IDF1, use TrackEval separately.
     """
+    # Load predictions
     pred = {}
     with open(pred_path) as f:
         for line in f:
@@ -123,6 +68,7 @@ def compute_basic_metrics(gt_path: str, pred_path: str):
                 "box": [x, y, x + w, y + h]
             })
 
+    # Load ground truth
     gt = {}
     with open(gt_path) as f:
         for line in f:
@@ -139,12 +85,14 @@ def compute_basic_metrics(gt_path: str, pred_path: str):
                 gt[frame_id] = []
             gt[frame_id].append([x, y, x + w, y + h])
 
-    total_gt    = sum(len(v) for v in gt.values())
-    total_fp    = 0
-    total_fn    = 0
+    # Simple MOTA calculation
+    total_gt   = sum(len(v) for v in gt.values())
+    total_fp   = 0
+    total_fn   = 0
     total_id_sw = 0
+
     iou_threshold = 0.5
-    prev_matches  = {}
+    prev_matches  = {}   # gt_idx → track_id
 
     for frame_id in sorted(gt.keys()):
         gt_boxes   = gt.get(frame_id, [])
@@ -153,14 +101,18 @@ def compute_basic_metrics(gt_path: str, pred_path: str):
         if not gt_boxes:
             total_fp += len(pred_boxes)
             continue
+
         if not pred_boxes:
             total_fn += len(gt_boxes)
             continue
 
+        # Compute IoU matrix
         gt_arr   = np.array(gt_boxes)
         pred_arr = np.array([p["box"] for p in pred_boxes])
+
         iou_matrix = _iou_matrix(gt_arr, pred_arr)
 
+        # Greedy matching
         matched_gt   = set()
         matched_pred = set()
         current_matches = {}
@@ -178,27 +130,31 @@ def compute_basic_metrics(gt_path: str, pred_path: str):
             iou_matrix[gi, :] = -1
             iou_matrix[:, pi] = -1
 
+        # Count metrics
         total_fn += len(gt_boxes) - len(matched_gt)
         total_fp += len(pred_boxes) - len(matched_pred)
 
+        # Count ID switches
         for gi, tid in current_matches.items():
             if gi in prev_matches and prev_matches[gi] != tid:
                 total_id_sw += 1
 
         prev_matches = current_matches
 
+    # MOTA = 1 - (FN + FP + IDSW) / GT
     mota = 1 - (total_fn + total_fp + total_id_sw) / max(total_gt, 1)
 
     return {
-        "MOTA": round(mota * 100, 2),
-        "FP":   total_fp,
-        "FN":   total_fn,
-        "IDSW": total_id_sw,
-        "GT":   total_gt,
+        "MOTA":  round(mota * 100, 2),
+        "FP":    total_fp,
+        "FN":    total_fn,
+        "IDSW":  total_id_sw,
+        "GT":    total_gt,
     }
 
 
 def _iou_matrix(gt_boxes, pred_boxes):
+    """Compute IoU matrix between gt and pred boxes."""
     iou = np.zeros((len(gt_boxes), len(pred_boxes)))
     for i, gb in enumerate(gt_boxes):
         for j, pb in enumerate(pred_boxes):
@@ -207,12 +163,15 @@ def _iou_matrix(gt_boxes, pred_boxes):
 
 
 def _iou(box_a, box_b):
+    """Compute IoU between two boxes [x1,y1,x2,y2]."""
     xi1 = max(box_a[0], box_b[0])
     yi1 = max(box_a[1], box_b[1])
     xi2 = min(box_a[2], box_b[2])
     yi2 = min(box_a[3], box_b[3])
+
     inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
     area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
     area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
     union  = area_a + area_b - inter
+
     return inter / (union + 1e-8)

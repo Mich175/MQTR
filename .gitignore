@@ -1,0 +1,7 @@
+checkpoints/*.pth
+mot17_feats/
+data/
+results/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

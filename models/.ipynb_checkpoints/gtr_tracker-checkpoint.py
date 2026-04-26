@@ -69,7 +69,6 @@ class GTRTracker:
             n_enc=n_enc,
             n_dec=n_dec,
         ).to(device)
-        self.transformer.eval()
 
         self.associator = MultiQueryAssociator(
             overlap_thresh        = overlap_thresh,
@@ -127,17 +126,7 @@ class GTRTracker:
     def load_reid_checkpoint(self, checkpoint_path: str):
         ckpt = torch.load(checkpoint_path, map_location=self.device)
         self.reid.load_state_dict(ckpt["model"])
-        self.reid.eval()
         print(f"✅ Re-ID checkpoint loaded from {checkpoint_path}")
-
-    def load_transformer_checkpoint(self, checkpoint_path: str):
-        """加载训练好的 GTR Transformer 权重。"""
-        ckpt = torch.load(checkpoint_path, map_location=self.device)
-        # train_transformer.py 保存格式是 {"model": state_dict, ...}
-        state_dict = ckpt["model"] if "model" in ckpt else ckpt
-        self.transformer.load_state_dict(state_dict)
-        self.transformer.eval()
-        print(f"✅ Transformer checkpoint loaded from {checkpoint_path}")
 
     @torch.no_grad()
     def update(self, frame: np.ndarray) -> List[Dict]:
@@ -145,6 +134,7 @@ class GTRTracker:
         detection = self.detector.detect(frame, self.frame_id)
 
         # Step 2: Extract ST Re-ID features
+        # 用上一帧的 track_ids 作为历史查询
         current_ids = (list(self.window)[-1].track_ids
                        if len(self.window) > 0 else None)
         reid_feats = self.reid.extract(
@@ -165,7 +155,7 @@ class GTRTracker:
             n = len(inst.boxes)
             inst.track_ids = torch.arange(
                 1, n + 1, dtype=torch.long, device=self.device)
-            self.id_count = n + 1   # 下一个可用 ID 从 n+1 开始
+            self.id_count = n + 1
             self.window.append(inst)
             self.all_instances.append(inst)
             self.frame_id += 1
@@ -184,9 +174,11 @@ class GTRTracker:
         self.window.append(inst)
         self.all_instances.append(inst)
 
-        # Step 6: 关联
+        # Step 6: 只对最新帧做关联（不重新关联整个窗口）
         window_list = list(self.window)
 
+        # 确保除最新帧外的所有帧都有 track_ids
+        # 如果没有则跳过关联，直接分配新 ID
         prev_has_ids = any(
             w.track_ids is not None
             for w in window_list[:-1]
@@ -198,11 +190,12 @@ class GTRTracker:
                 instances=window_list,
                 id_count=self.id_count,
             )
+            # 更新窗口
             self.window.clear()
             for w in window_list:
                 self.window.append(w)
         else:
-            # 修复: 没有历史时正确分配 ID，arange 是左闭右开所以用 id_count+n
+            # 没有历史，直接分配新 ID
             n = len(inst.boxes)
             new_ids = torch.arange(
                 self.id_count,
@@ -231,20 +224,15 @@ class GTRTracker:
 
     def track_video(
         self,
-        video_path:             str,
-        output_path:            Optional[str] = None,
-        show:                   bool = False,
-        reid_checkpoint:        Optional[str] = None,
-        transformer_checkpoint: Optional[str] = None,
+        video_path:      str,
+        output_path:     Optional[str] = None,
+        show:            bool = False,
+        checkpoint_path: Optional[str] = None,
     ) -> List[List[Dict]]:
         self.reset()
 
-        if reid_checkpoint:
-            self.load_reid_checkpoint(reid_checkpoint)
-
-        # 修复: 支持加载 Transformer 权重
-        if transformer_checkpoint:
-            self.load_transformer_checkpoint(transformer_checkpoint)
+        if checkpoint_path:
+            self.load_reid_checkpoint(checkpoint_path)
 
         cap    = cv2.VideoCapture(video_path)
         writer = None
