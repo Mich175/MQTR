@@ -5,3 +5,4 @@ results/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+mot17_feats/
